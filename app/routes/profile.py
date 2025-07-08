@@ -1,12 +1,13 @@
 from flask import Blueprint, request, jsonify
-from app.services.profile_service import *
-
+from flask import Blueprint, jsonify, request
+from app.services.profile_service import get_profile_data, update_profile_data, get_experiences, add_experience, update_experience, delete_experience, get_languages, update_languages, get_certifications, update_certifications, get_job_preferences, update_job_preferences
 
 profile_bp = Blueprint("profile", __name__)
 
 @profile_bp.route("", methods=["GET"])
-def get_profile():
-    response, status = get_profile_data()
+@profile_bp.route("/<string:candidate_id>", methods=["GET"])
+def get_profile(candidate_id=None):
+    response, status = get_profile_data(candidate_id)
     return jsonify(response), status
 
 

@@ -12,7 +12,9 @@ def extract_skills(text):
     """
     skill_extractor = current_app.skill_extractor
     SKILL_DB=current_app.SKILL_DB
-    annotations = skill_extractor.annotate(text)
+    # Convert text to lowercase for consistent skill extraction, similar to the notebook's approach
+    text_lower = text.lower()
+    annotations = skill_extractor.annotate(text_lower)
     skills = []
 
     # Parcourir les résultats pour tous les types de matching

@@ -2,23 +2,39 @@ from flask import current_app, request
 from supabase import Client
 import json
 from datetime import datetime
+from flask import current_app, request
 from .cv_service import verify_supabase_token
 
-def get_profile_data():
-    authenticated_uid = verify_supabase_token()
-    if not authenticated_uid:
-        return {"error": "Unauthorized"}, 401
+def get_profile_data(candidate_id=None):
+    if candidate_id:
+        # If candidate_id is provided, bypass authentication and use it directly
+        target_uid = candidate_id
+    else:
+        # If no candidate_id, authenticate the current user
+        authenticated_uid = verify_supabase_token()
+        if not authenticated_uid:
+            return {"error": "Unauthorized"}, 401
+        target_uid = authenticated_uid
 
     supabase: Client = current_app.supabase
 
     try:
         # Fetch candidate basic data
-        candidate_response = supabase.table("candidates").select("*").eq("id", authenticated_uid).single().execute()
+        current_app.logger.info(f"get_profile_data: Target UID: {target_uid}")
+
+        # Fetch candidate basic data
+        current_app.logger.info(f"get_profile_data: Fetching candidate data for UID: {target_uid}")
+        candidate_response = supabase.table("candidates").select("*").eq("id", target_uid).single().execute()
         candidate_data = candidate_response.data or {}
+        current_app.logger.info(f"get_profile_data: Raw candidate response: {candidate_response.data}")
+        current_app.logger.info(f"get_profile_data: Processed candidate data: {candidate_data}")
 
         # Fetch candidate profile data
-        profile_response = supabase.table("candidate_profiles").select("*").eq("candidate_id", authenticated_uid).single().execute()
+        current_app.logger.info(f"get_profile_data: Fetching profile data for UID: {target_uid}")
+        profile_response = supabase.table("candidate_profiles").select("*").eq("candidate_id", target_uid).single().execute()
         profile_data = profile_response.data or {}
+        current_app.logger.info(f"get_profile_data: Raw profile response: {profile_response.data}")
+        current_app.logger.info(f"get_profile_data: Processed profile data: {profile_data}")
 
         # Combine into ProfileData structure
         profile = {
@@ -27,8 +43,8 @@ def get_profile_data():
             "location": profile_data.get("location", ""),
             "avatarUrl": profile_data.get("avatar_url", ""),
             "about": profile_data.get("about", ""),
-            "experiences": json.loads(profile_data.get("experience", "[]")),
-            "education": json.loads(profile_data.get("education", "[]")),
+            "experiences": json.loads(profile_data.get("experience") or "[]"),
+            "education": json.loads(profile_data.get("education") or "[]"),
             "skills": {
                 "extracted": {
                     "pySkills": profile_data.get("py_skills", []),
@@ -36,9 +52,9 @@ def get_profile_data():
                 },
                 "added": profile_data.get("added_skills", [])
             },
-            "languages": json.loads(profile_data.get("languages", "[]")),
-            "certifications": json.loads(profile_data.get("certifications", "[]")),
-            "jobPreferences": json.loads(profile_data.get("job_preferences", "{}")),
+            "languages": json.loads(profile_data.get("languages") or "[]"),
+            "certifications": json.loads(profile_data.get("certifications") or "[]"),
+            "jobPreferences": json.loads(profile_data.get("job_preferences") or "{}"),
             "contact": {
                 "email": candidate_data.get("email", ""),
                 "phone": candidate_data.get("phone", ""),

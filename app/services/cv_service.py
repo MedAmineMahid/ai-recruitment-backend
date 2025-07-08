@@ -26,7 +26,7 @@ def verify_supabase_token() -> str | None:
         current_app.logger.error(f"Supabase token verification failed: {str(e)}")
         return None
     
-def update_or_insert_candidate_profile(supabase, uid, public_url,cv_text):
+def update_or_insert_candidate_profile(supabase, uid, filename, cv_text):
     # Step 1: Check if profile exists
     existing_profile = supabase.table("candidate_profiles").select("id").eq("candidate_id", uid).execute()
 
@@ -34,10 +34,10 @@ def update_or_insert_candidate_profile(supabase, uid, public_url,cv_text):
         # Step 2: Update existing profile
         profile_id = existing_profile.data[0]["id"]
         update_response = supabase.table("candidate_profiles").update({
-            "cv_path": public_url,
+            "cv_path": filename,
             "cv_last_updated": datetime.datetime.utcnow().isoformat(),
             "source": "candidate",
-            "cv":cv_text
+            "cv": cv_text
         }).eq("id", profile_id).execute()
 
         if hasattr(update_response, 'error') and update_response.error:
@@ -46,10 +46,10 @@ def update_or_insert_candidate_profile(supabase, uid, public_url,cv_text):
         # Step 3: Insert new profile
         insert_response = supabase.table("candidate_profiles").insert({
             "candidate_id": uid,
-            "cv_path": public_url,
+            "cv_path": filename,
             "cv_last_updated": datetime.datetime.utcnow().isoformat(),
             "source": "candidate",
-            "cv":cv_text
+            "cv": cv_text
         }).execute()
 
         if hasattr(insert_response, 'error') and insert_response.error:
@@ -90,8 +90,12 @@ def upload_cv():
 
     try:
         # Save file locally
-        file.save(local_file_path)
-        current_app.logger.info(f"CV saved locally at: {local_file_path}")
+        try:
+            file.save(local_file_path)
+            current_app.logger.info(f"CV saved locally at: {local_file_path}")
+        except Exception as e:
+            current_app.logger.error(f"Error saving CV file locally: {str(e)}")
+            return {"error": "Failed to save CV file locally"}, 500
         
         # Read file content for text extraction
         with open(local_file_path, 'rb') as f:
@@ -102,12 +106,12 @@ def upload_cv():
         if not cv_text:
             return {"error": "Failed to extract CV text"}, 500
 
-        # Update Supabase with local file path
-        update_response = supabase.table("candidates").update({"cv_url": local_file_path}).eq("id", uid).execute()
+        # Update Supabase with just the filename
+        update_response = supabase.table("candidates").update({"cv_url": filename}).eq("id", uid).execute()
         if hasattr(update_response, 'error') and update_response.error:
             return {"error": "Failed to update Supabase candidates DB"}, 500
 
-        result = update_or_insert_candidate_profile(supabase, uid, local_file_path, cv_text)
+        result = update_or_insert_candidate_profile(supabase, uid, filename, cv_text)
         if "error" in result:
             return result, 500
 
@@ -121,14 +125,17 @@ def upload_cv():
             current_app.logger.error(f"Error triggering matching for candidate {uid}: {str(match_e)}", exc_info=True)
             # Decide whether to return an error or proceed. For now, we'll log and proceed.
 
-        return {"success": True, "url": local_file_path}, 200
+        download_url = f"http://127.0.0.1:5000/cv/download/{filename}"
+        return {"success": True, "url": download_url}, 200
 
     except StorageException as e:
         current_app.logger.error(f"Storage error during CV upload: {str(e)}")
         return {"error": "Failed to upload file to storage"}, 500
-    except Exception as e:
-        current_app.logger.error(f"CV upload error: {str(e)}", exc_info=True)
-        return {"error": "Internal server error"}, 500
+
+def get_cv_by_id(cv_id):
+    # Placeholder for fetching CV by ID
+    # In a real application, this would involve querying the database for CV details
+    return {"id": cv_id, "content": "CV content placeholder"}
 
 def get_cv():
     if request.method == "OPTIONS":
@@ -154,13 +161,9 @@ def get_cv():
         if not data or not data.get("cv_url"):
             return {"error": "CV not found"}, 404
 
-        local_cv_path = data["cv_url"]
-        if not os.path.exists(local_cv_path):
-            return {"error": "CV file not found locally"}, 404
-
-        # Extract just the filename from the local_cv_path
-        filename = os.path.basename(local_cv_path)
-        return {"cv_filename": filename}, 200
+        filename = data["cv_url"]
+        download_url = f"http://127.0.0.1:5000/cv/download/{filename}"
+        return {"cv_url": download_url}, 200
     except Exception as e:
         current_app.logger.error(f"Error getting CV: {str(e)}")
         return {"error": "Internal server error"}, 500
@@ -186,11 +189,14 @@ def delete_cv():
         if not data or not data.get("cv_url"):
             return {"error": "CV not found"}, 404
 
-        local_cv_path = data["cv_url"]
-        if os.path.exists(local_cv_path):
-            os.remove(local_cv_path)
+        filename = data["cv_url"]
+        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads/cvs')
+        full_cv_path = os.path.join(upload_folder, filename)
+
+        if os.path.exists(full_cv_path):
+            os.remove(full_cv_path)
         else:
-            current_app.logger.warning(f"Attempted to delete non-existent local CV file: {local_cv_path}")
+            current_app.logger.warning(f"Attempted to delete non-existent local CV file: {full_cv_path}")
 
         supabase.table("candidates").update({"cv_url": None}).eq("id", uid).execute()
         supabase.table("candidate_profiles").update({"cv_path": None}).eq("candidate_id", uid).execute()

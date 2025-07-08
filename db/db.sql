@@ -62,6 +62,7 @@ CREATE TABLE public.companies (
 );
 CREATE TABLE public.jobs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
+  recruiter_id uuid,
   company_id uuid,
   title text,
   description text,
@@ -79,7 +80,8 @@ CREATE TABLE public.jobs (
   is_active boolean DEFAULT true,
   match_criteria jsonb,
   CONSTRAINT jobs_pkey PRIMARY KEY (id),
-  CONSTRAINT jobs_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id)
+  CONSTRAINT jobs_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id),
+  CONSTRAINT jobs_recruiter_id_fkey FOREIGN KEY (recruiter_id) REFERENCES public.recruiters(id)
 );
 CREATE TABLE public.recruiters (
   id uuid NOT NULL,
@@ -89,3 +91,51 @@ CREATE TABLE public.recruiters (
   CONSTRAINT recruiters_pkey PRIMARY KEY (id),
   CONSTRAINT recruiters_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
 );
+
+
+
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id UUID NOT NULL, -- Can be candidate or recruiter
+    receiver_id UUID NOT NULL, -- Can be candidate or recruiter
+    job_id UUID REFERENCES jobs (id) ON DELETE CASCADE, -- Optional: link message to a specific job application
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE public.candidate_job_matches (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    candidate_id UUID REFERENCES public.candidates(id) ON DELETE CASCADE,
+    job_id UUID REFERENCES public.jobs(id) ON DELETE CASCADE,
+    match_score NUMERIC(5, 2) NOT NULL,
+    sbert_similarity NUMERIC(5, 2),
+    skill2vec_similarity NUMERIC(5, 2),
+    matched_skills JSONB,
+    candidate_skills JSONB,
+    job_skills JSONB,
+    prediction TEXT,
+    match_percentage NUMERIC(5, 2),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.candidate_job_matches ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Candidates can view their own job matches" ON public.candidate_job_matches
+FOR SELECT TO authenticated USING (candidate_id = auth.uid());
+
+CREATE POLICY "Candidates can insert their own job matches" ON public.candidate_job_matches
+FOR INSERT TO authenticated WITH CHECK (candidate_id = auth.uid());
+
+CREATE POLICY "Candidates can update their own job matches" ON public.candidate_job_matches
+FOR UPDATE TO authenticated USING (candidate_id = auth.uid());
+
+CREATE POLICY "Candidates can delete their own job matches" ON public.candidate_job_matches
+FOR DELETE TO authenticated USING (candidate_id = auth.uid());
+
+CREATE POLICY "Allow anon insert if authenticated" ON public.candidate_job_matches
+FOR INSERT TO anon WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "Allow anon update if authenticated" ON public.candidate_job_matches
+FOR UPDATE TO anon USING (auth.role() = 'authenticated');

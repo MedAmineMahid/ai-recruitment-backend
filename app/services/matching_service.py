@@ -201,115 +201,45 @@ class MatchingService:
         """
         try:
             supabase: Client = current_app.supabase
-            
-            # Get job information
+
+            # Get job details
             job_response = supabase.table("jobs").select(
-                "title, description, location, requirements"
+                "id, title, description, requirements, location"
             ).eq("id", job_id).execute()
 
             if not job_response.data:
-                current_app.logger.warning(f"Job not found for matching: {job_id}")
+                current_app.logger.warning(f"Job {job_id} not found for matching.")
                 return []
 
             job_data = job_response.data[0]
 
-
-            
             # Construct job text
             job_text_parts = [
                 job_data.get('title', ''),
                 job_data.get('description', ''),
                 job_data.get('location', '')
             ]
-            
             requirements = job_data.get('requirements', [])
             if requirements:
                 job_text_parts.append(' '.join(requirements))
-            
             job_text = ' '.join(filter(None, job_text_parts))
-            
+
             # Get candidates to match against
             candidates_query = supabase.table("candidate_profiles").select(
-                "candidate_id, cv_path, skills, experience, education"
+                "candidate_id, cv_path, skillner_skills, experience, education"
             )
-            
+
             if candidate_ids:
                 candidates_query = candidates_query.in_("candidate_id", candidate_ids)
-            
-            candidates_response = candidates_query.limit(limit * 2).execute()
-            
-            if not candidates_response.data:
-                return []
-            
-            results = []
-            
-            for candidate in candidates_response.data:
-                candidate_id = candidate['candidate_id']
-                
-                # Get candidate basic info
-                candidate_info_response = supabase.table("candidates").select(
-                    "full_name, email, phone"
-                ).eq("id", candidate_id).execute()
-                
-                candidate_info = candidate_info_response.data[0] if candidate_info_response.data else {}
-                
-                # Construct candidate text (similar to above)
-                cv_text = candidate.get('cv_path', '')
-                skills = candidate.get('skills', [])
-                experience = candidate.get('experience', '[]')
-                education = candidate.get('education', '[]')
-                
-                # Parse JSON fields
-                if isinstance(experience, str):
-                    try:
-                        experience = json.loads(experience)
-                    except:
-                        experience = []
-                
-                if isinstance(education, str):
-                    try:
-                        education = json.loads(education)
-                    except:
-                        education = []
-                
-                candidate_text_parts = [cv_text]
-                
-                if skills:
-                    candidate_text_parts.append(' '.join(skills))
-                
-                for exp in experience:
-                    if isinstance(exp, dict):
-                        candidate_text_parts.extend([
-                            exp.get('title', ''),
-                            exp.get('company', ''),
-                            exp.get('description', '')
-                        ])
-                
-                candidate_text = ' '.join(filter(None, candidate_text_parts))
-                
-                # Calculate hybrid matching score
-                match_result = self.hybrid_ai.calculate_hybrid_score(
-                    candidate_text, job_text
-                )
-                
-                results.append({
-                    'candidate_id': candidate_id,
-                    'candidate_name': candidate_info.get('full_name', ''),
-                    'candidate_email': candidate_info.get('email', ''),
-                    'candidate_phone': candidate_info.get('phone', ''),
-                    'candidate_skills': skills,
-                    'match_score': match_result['hybrid_score'],
-                    'sbert_similarity': match_result['sbert_similarity'],
-                    'skill2vec_similarity': match_result['skill2vec_similarity'],
-                    'matched_skills': list(set(match_result['resume_skills']) & set(match_result['job_skills'])),
-                    'prediction': match_result['hybrid_prediction'],
-                    'match_percentage': round(match_result['hybrid_score'] * 100, 2)
-                })
-            
-            # Sort by match score descending and limit results
-            results.sort(key=lambda x: x['match_score'], reverse=True)
 
-            # Store results in candidate_job_matches table
+            candidates_response = candidates_query.execute()
+
+            if not candidates_response.data:
+                current_app.logger.info(f"No candidates found for matching job {job_id}.")
+                return []
+
+            results = []
+
             # Delete all existing matches for this job before inserting new ones
             try:
                 delete_response = supabase.table("candidate_job_matches").delete().eq("job_id", job_id).execute()
@@ -320,29 +250,76 @@ class MatchingService:
             except Exception as e:
                 current_app.logger.error(f"Error deleting previous matches for job {job_id}: {str(e)}", exc_info=True)
 
-            for match in results:
+            for candidate in candidates_response.data:
+                # Construct candidate text
+                cv_text = candidate.get('cv_path', '')
+                skills = candidate.get('skillner_skills', [])
+                experience = candidate.get('experience', '[]')
+                education = candidate.get('education', '[]')
+
+                if isinstance(experience, str):
+                    try:
+                        experience = json.loads(experience)
+                    except:
+                        experience = []
+
+                if isinstance(education, str):
+                    try:
+                        education = json.loads(education)
+                    except:
+                        education = []
+
+                candidate_text_parts = [cv_text]
+                if skills:
+                    candidate_text_parts.append(' '.join(skills))
+                for exp in experience:
+                    if isinstance(exp, dict):
+                        candidate_text_parts.extend([
+                            exp.get('title', ''),
+                            exp.get('company', ''),
+                            exp.get('description', '')
+                        ])
+                for edu in education:
+                    if isinstance(edu, dict):
+                        candidate_text_parts.extend([
+                            edu.get('degree', ''),
+                            edu.get('institution', ''),
+                            edu.get('description', '')
+                        ])
+                candidate_text = ' '.join(filter(None, candidate_text_parts))
+
+                # Calculate hybrid matching score
+                match_result = self.hybrid_ai.calculate_hybrid_score(
+                    candidate_text, job_text
+                )
+
+                match_data = {
+                    'candidate_id': candidate['candidate_id'],
+                    'job_id': job_id,
+                    'match_score': match_result['hybrid_score'],
+                    'sbert_similarity': match_result['sbert_similarity'],
+                    'skill2vec_similarity': match_result['skill2vec_similarity'],
+                    'matched_skills': list(set(match_result['resume_skills']) & set(match_result['job_skills'])),
+                    'candidate_skills': match_result['resume_skills'],
+                    'job_skills': match_result['job_skills'],
+                    'prediction': match_result['hybrid_prediction'],
+                    'match_percentage': round(match_result['hybrid_score'] * 100, 2)
+                }
+                results.append(match_data)
+
+                # Store results in candidate_job_matches table
                 try:
-                    supabase.table("candidate_job_matches").insert({
-                        "candidate_id": match['candidate_id'],
-                        "job_id": job_id,
-                        "match_score": match['match_score'],
-                        "sbert_similarity": match['sbert_similarity'],
-                        "skill2vec_similarity": match['skill2vec_similarity'],
-                        "matched_skills": match['matched_skills'],
-                        "candidate_skills": match['candidate_skills'],
-                        "job_skills": match['job_skills'],
-                        "prediction": match['prediction'],
-                        "match_percentage": match['match_percentage']
-                    }).execute()
+                    supabase.table("candidate_job_matches").insert(match_data).execute()
                 except Exception as db_e:
-                    current_app.logger.error(f"Error storing match for job {job_id} and candidate {match['candidate_id']}: {str(db_e)}")
-            
+                    current_app.logger.error(f"Error storing match for job {job_id} and candidate {candidate['candidate_id']}: {str(db_e)}")
+
+            # Sort by match score descending and return limited results
+            results.sort(key=lambda x: x['match_score'], reverse=True)
             return results[:limit]
-            
+
         except Exception as e:
-            current_app.logger.error(f"Error in job candidate matching: {str(e)}")
+            current_app.logger.error(f"Error in job to candidate matching: {str(e)}")
             return []
-    
     def get_skill_recommendations(self, candidate_id: str, target_job_id: str) -> Dict[str, Any]:
         """
         Get skill recommendations for a candidate based on a target job.

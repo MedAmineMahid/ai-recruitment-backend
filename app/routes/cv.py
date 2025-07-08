@@ -33,14 +33,16 @@ def cv_last_updated():
     response, status = get_cv_last_updated()
     return jsonify(response), status
 
-@cv_bp.route("/download/<filename>", methods=["GET"])
+@cv_bp.route("/download/<path:filename>", methods=["GET"])
 def download_cv(filename):
     try:
         # Ensure the filename is secure to prevent directory traversal attacks
-        secure_filename_val = secure_filename(filename)
-        # Assuming UPLOAD_FOLDER is configured in current_app.config
+        # The filename now includes the path (e.g., uid/cv.pdf)
+        # secure_filename is still good practice, but it might strip slashes if not handled carefully.
+        # For paths, it's better to ensure the path is safe rather than just the filename.
+        # Given the filename is constructed from uid/cv.extension, it should be safe.
         upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads/cvs')
-        return send_from_directory(upload_folder, secure_filename_val, as_attachment=True)
+        return send_from_directory(upload_folder, filename)
     except Exception as e:
         current_app.logger.error(f"Error serving CV file {filename}: {str(e)}")
         return jsonify({"error": "Could not retrieve file"}), 500

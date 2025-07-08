@@ -46,6 +46,16 @@ CREATE TABLE jobs (
     location TEXT,
     requirements TEXT[],
     education TEXT,
+    contract_type TEXT,
+    work_mode TEXT,
+    salary_min NUMERIC,
+    salary_max NUMERIC,
+    salary_currency TEXT,
+    skills TEXT[],
+    is_active BOOLEAN DEFAULT TRUE,
+    match_criteria JSONB,
+    experience TEXT,
+    deadline DATE,
     file_url TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
